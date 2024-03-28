@@ -1,0 +1,282 @@
+﻿@page "/"
+
+@using ChartJs.Blazor.Charts
+@using ChartJs.Blazor.ChartJS.LineChart
+@using ChartJs.Blazor.ChartJS.Common.Properties
+@using ChartJs.Blazor.ChartJS.Common.Wrappers
+@using ChartJs.Blazor.ChartJS.Common.Enums
+@using ChartJs.Blazor.ChartJS.Common.Handlers
+@using ChartJs.Blazor.ChartJS.Common.Axes
+@using ChartJs.Blazor.Util
+@using System.Timers;
+@using CDBInstantMetricsVisualizer.Data
+@using Microsoft.Extensions.Configuration;
+
+@inject CDBMetricService cdbMetricService
+@inject CosmosDBService cdbService
+@inject IConfiguration configuration
+
+<div class="container mt-2">
+    <div class="row">
+        <div class="col text-center">
+            <h3 class="mx-auto">@configuration["DashboardTitle"]</h3>
+        </div>
+        <div class="col text-center">
+            <button class="btn btn-primary" @onclick="PauseTimer"> @timerbuttonText</button>
+            <button class="btn btn-primary" @onclick="ResetData">Reset</button>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col">
+            <h6>Total RU/Sec</h6>
+            <ChartJsLineChart @ref="RU_lineChartJs" Config="@RU_config"  Height="250" />
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <h6>Average Latency/Request</h6>
+            <ChartJsLineChart @ref="Lat_lineChartJs" Config="@Lat_config"  Height="250" />
+        </div>
+    </div>
+    <div class="row">
+        <div class="col">
+            <h6>Request Count by Status and Region</h6>
+            <ChartJsLineChart @ref="Status_lineChartJs" Config="@Status_config"  Height="250" />
+        </div>
+    </div>
+</div>
+  
+
+@code {
+
+    private string timerbuttonText="Pause";
+
+    private LineConfig RU_config;
+    private ChartJsLineChart RU_lineChartJs;
+
+    private LineConfig Lat_config;
+    private ChartJsLineChart Lat_lineChartJs;
+
+    private LineConfig Status_config;
+    private ChartJsLineChart Status_lineChartJs;
+
+
+    private static string[] colors = new string[] {"MediumVioletRed", "Green","Orange",
+        "DodgerBlue","SteelBlue","DarkMagenta","Fuchsia","MediumOrchid",
+        "Chocolate","BlanchedAlmond", "Cornsilk", "DarkGreen", "IndianRed","DarkOliveGreen",
+        "ForestGreen","MediumAquamarine","GreenYellow", "CadelBlue", "Cyan","MediumBlue","LightPink", "MediumVioletRed", "Green","Orange",
+        "MediumVioletRed", "Green","Orange","Black"};
+
+    private Dictionary<string, string> ColorMap = new Dictionary<string, string>();
+    private static System.Timers.Timer aTimer;
+    private bool resetData;
+
+
+    protected override async void OnInitialized()
+    {
+        //starting change feed
+        string today = new(System.DateTime.Today.ToString());
+        cdbService.initChnageFeed(today);
+
+        cdbMetricService.Init(cdbService);
+
+        //initial chart data
+        AddLineData(RU_lineChartJs,cdbService.UniqueFunctionNames, CDBMetricService.MetricType.RU, RU_config, false);
+        AddLineData(Lat_lineChartJs, cdbService.UniqueFunctionNames, CDBMetricService.MetricType.Latency, Lat_config, false);
+        AddLineData(Status_lineChartJs, cdbService.UniqueStatusCode, CDBMetricService.MetricType.StatusCode, Status_config, false);
+
+        RU_config=SetCanvas("Total RU","Time","RU");
+
+        Lat_config = SetCanvas("Client-side latency in milliseconds", "Time", "Milliseconds");
+
+        Status_config = SetCanvas("RequestCount by Status", "Time", "Request Count");
+
+        // Create a timer with a 2 second interval.
+        aTimer = new System.Timers.Timer(2000);
+        // Hook up the Elapsed event for the timer.
+        aTimer.Elapsed += OnTimedEvent;
+        aTimer.AutoReset = true;
+        aTimer.Enabled = true;
+    }
+
+    private async void OnTimedEvent(Object source, ElapsedEventArgs e)
+    {
+        if(resetData)
+        {
+            aTimer.Enabled = false;
+
+            cdbMetricService.ResetData();
+
+            resetData = false;
+
+            aTimer.Enabled = true;
+        }
+
+        RU_config.Data.Datasets.Clear();
+        AddLineData(RU_lineChartJs, cdbService.UniqueFunctionNames, CDBMetricService.MetricType.RU, RU_config, true);
+
+        Lat_config.Data.Datasets.Clear();
+        AddLineData(Lat_lineChartJs, cdbService.UniqueFunctionNames, CDBMetricService.MetricType.Latency, Lat_config, true);
+
+        Status_config.Data.Datasets.Clear();
+        AddLineData(Status_lineChartJs, cdbService.UniqueStatusCode, CDBMetricService.MetricType.StatusCode, Status_config, true);
+    }
+
+    private LineConfig SetCanvas(string Title, string xAxisLabel, string yAxisLabel)
+    {
+        LineConfig config = new LineConfig
+            {
+                Options = new LineOptions
+                {
+
+                    Responsive = true,
+                    MaintainAspectRatio = false,
+                    Title = new OptionsTitle
+                    {
+                        Display = false,
+                        Text = Title
+                    },
+                    Legend = new Legend
+                    {
+                        Position = Position.Bottom,
+                        Labels = new LegendLabelConfiguration
+                        {
+                            UsePointStyle = true
+                        }
+                    },
+                    Tooltips = new Tooltips
+                    {             
+                        Enabled=false,
+                        Mode = InteractionMode.Nearest,
+                        Intersect = false
+                    },
+                    Scales = new Scales
+                    {
+                        xAxes = new List<CartesianAxis>
+                        {
+                            new CategoryAxis
+                            {
+                                ScaleLabel = new ScaleLabel
+                                {
+                                    Display = false,
+                                    LabelString = xAxisLabel
+                                }
+                            }
+                        },
+                        yAxes = new List<CartesianAxis>
+                        {
+                            new LinearCartesianAxis
+                            {
+                                ScaleLabel = new ScaleLabel
+                                {
+                                    LabelString = yAxisLabel
+                                }
+                            }
+                        }
+                    },
+                    Hover = new LineOptionsHover
+                    {
+                        Enabled=false,
+                        Intersect = true,
+                        Mode = InteractionMode.Y
+                    },
+                    Animation = new Animation
+                    {
+                        Easing = Easing.Linear,
+                        Duration = 10
+                    }
+                }
+            };
+
+        return config;
+    }
+
+
+    private async void ResetData()
+    {
+        resetData = true;
+        if (!aTimer.Enabled)        
+        {
+            aTimer.Enabled = true;
+            timerbuttonText = "Pause";
+        }
+    }
+
+    private async void PauseTimer()
+    {
+        if (aTimer.Enabled)
+        {
+            aTimer.Enabled = false;
+            timerbuttonText = "Resume";
+        }
+        else
+        {
+            aTimer.Enabled = true;
+            timerbuttonText = "Pause";
+        }
+
+    }
+
+    private async void AddLineData(ChartJsLineChart lineChartJs, List<string> metricKeys, CDBMetricService.MetricType mtype, LineConfig config, bool update = true)
+    {
+        List<string> labels=new List<string>();
+        //update  chart data using CDB metrics
+        await cdbMetricService.UpdateMetricsAsync(mtype,labels);
+
+        switch (mtype)
+        {
+            case CDBMetricService.MetricType.RU:
+                metricKeys = cdbService.UniqueFunctionNames;
+                break;
+            case CDBMetricService.MetricType.Latency:
+                metricKeys = cdbService.UniqueFunctionNames;
+                break;
+            case CDBMetricService.MetricType.StatusCode:
+                metricKeys = cdbService.UniqueStatusCode;
+                break;
+        }
+
+        try
+        {
+            //add a line for each metric
+            foreach (var metrickey in metricKeys)
+            {   
+                if (!ColorMap.ContainsKey(metrickey))
+                {
+                    int i = ColorMap.Count() % colors.Count();
+                    ColorMap.Add(metrickey, colors[i]);
+                }
+
+                var chartdata = cdbMetricService.MetricsList[metrickey].Select(d => new DoubleWrapper(d)).ToArray();
+                string lineColor = ColorMap[metrickey]; //ColorUtil.RandomColorString();
+
+                var lineDataset = new LineDataset<DoubleWrapper>
+                    {
+                        BackgroundColor = lineColor,
+                        BorderColor = lineColor,
+                        Label = metrickey,
+                        Fill = false,
+                        PointBackgroundColor = lineColor,
+                        BorderWidth = 2,
+                        PointRadius = 3,
+                        PointBorderWidth = 1,
+                        SteppedLine = SteppedLine.False
+                    };
+
+                lineDataset.AddRange(chartdata);
+
+
+                config.Data.Labels = labels;
+                config.Data.Datasets.Add(lineDataset);
+            }
+
+       
+            if (update)
+                await lineChartJs.Update();
+        }
+        catch
+        { }
+    }
+}
+
